@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/ardnew/csm"
 	"github.com/ardnew/csm/log"
-	"github.com/ardnew/csm/pkg"
-	"github.com/ardnew/csm/pkg/suite/filter"
+	"github.com/ardnew/csm/suite/filter"
 )
 
 var (
@@ -22,24 +22,50 @@ var (
 	REVISION  string
 )
 
-const defaultOutputFileName = "TestSuite.zip"
+const (
+	quietLoggingFlag      = "q"
+	logFieldDefsFlag      = "d"
+	invertFilterFlag      = "r"
+	keepContentFlag       = "k"
+	suiteFilterFlag       = "f"
+	outputArchivePathFlag = "o"
+	extractDirPathFlag    = "x"
+)
 
 func main() {
 
 	var (
-		quietLogging   bool
-		logFieldDefs   bool
-		outputFilePath string
-		suiteFilter    filter.Filters
+		quietLogging      bool
+		logFieldDefs      bool
+		invertFilter      bool
+		keepContent       bool
+		suiteFilter       filter.Filters
+		outputArchivePath string
+		extractDirPath    string
 	)
 
-	defaultOutputFilePath := filepath.Join(os.Getenv("PWD"), defaultOutputFileName)
+	const defaultExtractDirPath = "."
 
-	flag.BoolVar(&quietLogging, "q", false, "Suppress printing non-error log messages (quiet)")
-	flag.BoolVar(&logFieldDefs, "d", false, "List the field definitions parsed from headers")
-	flag.StringVar(&outputFilePath, "o", defaultOutputFilePath, "Output test suite (.zip) file path")
-	flag.Var(&suiteFilter, "f", "Filter expressions, may be specified multiple times")
+	flag.BoolVar(&quietLogging, quietLoggingFlag, false,
+		"Suppress printing non-error log messages (quiet)")
+	flag.BoolVar(&logFieldDefs, logFieldDefsFlag, false,
+		"List the field definitions parsed from headers")
+	flag.BoolVar(&invertFilter, invertFilterFlag, false,
+		"Invert matching semantics (select non-matching records)")
+	flag.BoolVar(&keepContent, keepContentFlag, false,
+		"Keep filtered files in extraction directory after suite creation")
+	flag.Var(&suiteFilter, suiteFilterFlag,
+		"Select records matching `expression` (logical-OR of each flag given)")
+	flag.StringVar(&outputArchivePath, outputArchivePathFlag, "",
+		"Create output test suite (.zip) at `filepath`")
+	flag.StringVar(&extractDirPath, extractDirPathFlag, defaultExtractDirPath,
+		"Extract and save filtered test suites to `dirpath`")
 	flag.Parse()
+
+	givenFlag := map[string]bool{}
+	flag.Visit(func(f *flag.Flag) {
+		givenFlag[f.Name] = true
+	})
 
 	if quietLogging {
 		log.Output = ioutil.Discard
@@ -50,39 +76,65 @@ func main() {
 		os.Exit(1)
 	}
 
-	if !strings.HasSuffix(outputFilePath, filepath.Ext(defaultOutputFileName)) {
-		outputFilePath = filepath.Join(outputFilePath, defaultOutputFileName)
-		log.Msg(log.Warn, "warning", "using default output file name: %q", outputFilePath)
+	if "" == outputArchivePath && "" == extractDirPath {
+		extractDirPath = defaultExtractDirPath
+	} else if "" != outputArchivePath {
+		if extractDirPath != defaultExtractDirPath && extractDirPath != "" {
+			log.Msg(log.Warn, "warning",
+				"using directory of output suite (-%s) instead of extraction path (-%s): %q",
+				outputArchivePathFlag, extractDirPathFlag,
+				filepath.Dir(outputArchivePath))
+		}
+		extractDirPath = filepath.Dir(outputArchivePath)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(outputFilePath), os.ModePerm); nil != err {
-		log.Msg(log.Error, "error", "os.MkdirAll(): %s", err.Error())
-		os.Exit(2)
+	if "" != outputArchivePath {
+		if !strings.HasSuffix(outputArchivePath, csm.ArchiveExt) {
+			outputArchivePath =
+				filepath.Join(outputArchivePath, filepath.Base(flag.Arg(0)))
+			log.Msg(log.Warn, "warning", "using default output file name: %q",
+				outputArchivePath)
+		}
+		err := os.MkdirAll(filepath.Dir(outputArchivePath), os.ModePerm)
+		if nil != err {
+			log.Msg(log.Error, "error", "os.MkdirAll(): %s", err.Error())
+			os.Exit(2)
+		}
+	}
+	if filepath.Dir(outputArchivePath) != extractDirPath {
+		if err := os.MkdirAll(extractDirPath, os.ModePerm); nil != err {
+			log.Msg(log.Error, "error", "os.MkdirAll(): %s", err.Error())
+			os.Exit(2)
+		}
 	}
 
 	for _, path := range flag.Args() {
-		p, err := pkg.New(path, outputFilePath)
+		p, err := csm.New(path, extractDirPath, outputArchivePath)
 		if nil != err {
-			log.Msg(log.Error, "error", "pkg.New(): %s", err.Error())
+			log.Msg(log.Error, "error", "csm.New(): %s", err.Error())
 			os.Exit(3)
 		}
 		if p.Stale() {
 			if err := p.Extract(); nil != err {
-				log.Msg(log.Error, "error", "pkg.Extract(): %s", err.Error())
+				log.Msg(log.Error, "error", "csm.Extract(): %s", err.Error())
 				os.Exit(4)
 			}
 		}
-		opts := pkg.FilterOpts{
+		opts := csm.Options{
 			LogFieldDefs: logFieldDefs,
+			InvertFilter: invertFilter,
+			KeepContent:  keepContent,
 			Filters:      suiteFilter,
 		}
 		if err := p.Filter(opts); nil != err {
-			log.Msg(log.Error, "error", "pkg.Filter(): %s", err.Error())
+			log.Msg(log.Error, "error", "csm.Filter(): %s", err.Error())
 			os.Exit(5)
 		}
-		if err := p.Compress(); nil != err {
-			log.Msg(log.Error, "error", "pkg.Compress(): %s", err.Error())
-			os.Exit(6)
+		if "" != outputArchivePath {
+			if err := p.Compress(opts); nil != err {
+				log.Msg(log.Error, "error", "csm.Compress(): %s", err.Error())
+				os.Exit(6)
+			}
 		}
 	}
 
