@@ -1,3 +1,4 @@
+.Makefile.targets
 go.sum
 run.sh
 /test
