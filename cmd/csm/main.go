@@ -72,7 +72,8 @@ func main() {
 	}
 
 	if len(flag.Args()) == 0 {
-		log.Msg(log.Error, "error", "no input test suite (.zip) file(s) provided")
+		log.Msg(log.Error, "error",
+			"no input test suite (.zip file or directory) provided")
 		os.Exit(1)
 	}
 
@@ -108,16 +109,27 @@ func main() {
 		}
 	}
 
-	for _, path := range flag.Args() {
+	path := flag.Arg(0)
+	{
 		p, err := csm.New(path, extractDirPath, outputArchivePath)
 		if nil != err {
 			log.Msg(log.Error, "error", "csm.New(): %s", err.Error())
 			os.Exit(3)
 		}
-		if p.Stale() {
-			if err := p.Extract(); nil != err {
-				log.Msg(log.Error, "error", "csm.Extract(): %s", err.Error())
-				os.Exit(4)
+		if info, err := os.Stat(path); nil != err {
+			log.Msg(log.Error, "error", "os.Stat(): %s", err.Error())
+			os.Exit(4)
+		} else if info.IsDir() {
+			if err := p.Replicate(); nil != err {
+				log.Msg(log.Error, "error", "csm.Replicate(): %s", err.Error())
+				os.Exit(5)
+			}
+		} else {
+			if p.Stale() {
+				if err := p.Extract(); nil != err {
+					log.Msg(log.Error, "error", "csm.Extract(): %s", err.Error())
+					os.Exit(6)
+				}
 			}
 		}
 		opts := csm.Options{
@@ -128,12 +140,12 @@ func main() {
 		}
 		if err := p.Filter(opts); nil != err {
 			log.Msg(log.Error, "error", "csm.Filter(): %s", err.Error())
-			os.Exit(5)
+			os.Exit(7)
 		}
 		if "" != outputArchivePath {
 			if err := p.Compress(opts); nil != err {
 				log.Msg(log.Error, "error", "csm.Compress(): %s", err.Error())
-				os.Exit(6)
+				os.Exit(8)
 			}
 		}
 	}

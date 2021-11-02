@@ -136,13 +136,14 @@ func (def *FieldDef) ValueForCsv(csvName string, record []string) (string, bool)
 }
 
 func (def *FieldDef) Log(w io.Writer, name string) {
-	fmt.Fprintln(w, "+:"+name)
+	n := log.Digits(len(def.In) + len(def.Out))
+	fmt.Fprintln(w, "==", name)
 	for _, f := range def.In {
-		fmt.Fprintf(w, "I[%d]:%q\n", f.csvCol, f.csvName)
+		fmt.Fprintf(w, "  I %0*d %q\n", n, f.csvCol, f.csvName)
 	}
 	for _, f := range def.Out {
-		fmt.Fprintf(w, "O[%d]=%q\n", f.csvColExt, f.csvNameExt)
-		fmt.Fprintf(w, "O[%d]:%q\n", f.csvCol, f.csvName)
+		fmt.Fprintf(w, "  E %0*d %q\n", n, f.csvColExt, f.csvNameExt)
+		fmt.Fprintf(w, "  O %0*d %q\n", n, f.csvCol, f.csvName)
 	}
 }
 

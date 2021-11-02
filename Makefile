@@ -14,7 +14,7 @@ endif
 
 PROJECT   ?= csm
 IMPORT    ?= github.com/ardnew/$(PROJECT)
-VERSION   ?= 0.1.0
+VERSION   ?= 0.1.2
 BUILDTIME ?= $(shell date -u '+%FT%TZ')
 PLATFORM  ?= linux-amd64
 

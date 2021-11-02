@@ -20,16 +20,18 @@ func New(in, out string, define, handle RecordHandler) (*Suite, error) {
 
 	s := Suite{inPath: in, outPath: out}
 
-	err := os.RemoveAll(s.outPath)
-	if nil != err {
-		return nil, err
+	o := io.Discard
+	if s.outPath != "" {
+		err := os.RemoveAll(s.outPath)
+		if nil != err {
+			return nil, err
+		}
+		o, err := os.Create(s.outPath)
+		if nil != err {
+			return nil, err
+		}
+		defer o.Close()
 	}
-
-	o, err := os.Create(s.outPath)
-	if nil != err {
-		return nil, err
-	}
-	defer o.Close()
 
 	i, err := os.Open(s.inPath)
 	if nil != err {
@@ -47,6 +49,12 @@ func (s *Suite) filter(r io.Reader, w io.Writer, d, h RecordHandler) (err error)
 
 	ci := csv.NewReader(r)
 	co := csv.NewWriter(w)
+	defer func() {
+		co.Flush()
+		if err == nil {
+			err = co.Error()
+		}
+	}()
 
 	lineNo := 0
 	for {
@@ -95,6 +103,5 @@ func (s *Suite) filter(r io.Reader, w io.Writer, d, h RecordHandler) (err error)
 		}
 	}
 
-	co.Flush()
-	return co.Error()
+	return
 }

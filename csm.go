@@ -1,6 +1,7 @@
 package csm
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 
@@ -23,7 +24,7 @@ const (
 )
 
 type CSM struct {
-	zipPath string // input zip file
+	arcPath string // input zip file or directory
 	csvPath string // path to files extracted from input zip
 	outPath string // output zip file
 	xtcPath string // path to files compressed into output zip
@@ -37,14 +38,14 @@ type Options struct {
 	Filters      filter.Filters
 }
 
-func New(zipPath, xtcPath, outPath string) (*CSM, error) {
+func New(arcPath, xtcPath, outPath string) (*CSM, error) {
 	csvPath := filepath.Join(xtcPath, CsvBase)
 	return &CSM{
-		zipPath: zipPath,
+		arcPath: arcPath,
 		csvPath: csvPath,
 		outPath: outPath,
 		xtcPath: xtcPath,
-		cache:   cache.New(zipPath, csvPath),
+		cache:   cache.New(arcPath, csvPath),
 	}, nil
 }
 
@@ -57,21 +58,19 @@ func (c *CSM) Stale() bool {
 		log.Msg(log.Warn, "cache", "%v", err)
 		return true
 	}
-	if stale, _ := c.cache.Stale(); stale {
-		return true
-	}
-	return false
+	stale, _ := c.cache.Stale()
+	return stale
 }
 
 func (c *CSM) Extract() error {
-	log.Msg(log.Info, "extract", "%q -> %q", c.zipPath, c.csvPath)
+	log.Msg(log.Info, "extract", "%q -> %q", c.arcPath, c.csvPath)
 	if err := os.RemoveAll(c.csvPath); nil != err {
 		return err
 	}
 	if err := os.MkdirAll(c.csvPath, os.ModePerm); nil != err {
 		return err
 	}
-	if err := archiver.Unarchive(c.zipPath, c.csvPath); nil != err {
+	if err := archiver.Unarchive(c.arcPath, c.csvPath); nil != err {
 		return err
 	}
 	if err := c.cache.Update(); nil != err {
@@ -82,6 +81,39 @@ func (c *CSM) Extract() error {
 		log.Msg(log.Warn, "cache", "updated %q", f)
 	}
 	if err := c.cache.Write(); nil != err {
+		return err
+	}
+	return nil
+}
+
+func (c *CSM) Replicate() error {
+	log.Msg(log.Info, "replicate", "%q -> %q", c.arcPath, c.csvPath)
+	if err := os.RemoveAll(c.csvPath); nil != err {
+		return err
+	}
+	if err := os.MkdirAll(c.csvPath, os.ModePerm); nil != err {
+		return err
+	}
+	cp := func(src, dst string) error {
+		s, err := os.Open(src)
+		if nil != err {
+			return err
+		}
+		defer s.Close()
+		d, err := os.Create(dst)
+		if nil != err {
+			return err
+		}
+		defer d.Close()
+		_, err = io.Copy(d, s)
+		return err
+	}
+	if err := cp(filepath.Join(c.arcPath, LandingName),
+		filepath.Join(c.csvPath, LandingName)); nil != err {
+		return err
+	}
+	if err := cp(filepath.Join(c.arcPath, TakeoffName),
+		filepath.Join(c.csvPath, TakeoffName)); nil != err {
 		return err
 	}
 	return nil
@@ -111,13 +143,18 @@ func (c *CSM) Compress(opts Options) error {
 
 func (c *CSM) Filter(opts Options) error {
 
-	log.Msg(log.Info, "filter", "%q -> %q", c.csvPath, c.xtcPath)
-
 	var takeoffDef, landingDef *field.FieldDef
 
+	var takeoffOut, landingOut string
+	if !opts.LogFieldDefs {
+		log.Msg(log.Info, "filter", "%q -> %q", c.csvPath, c.xtcPath)
+		takeoffOut = filepath.Join(c.xtcPath, TakeoffName)
+		landingOut = filepath.Join(c.xtcPath, LandingName)
+	}
+
 	ts, err := suite.New(
-		filepath.Join(c.csvPath, TakeoffName),              // source file
-		filepath.Join(c.xtcPath, TakeoffName),              // output file
+		filepath.Join(c.csvPath, TakeoffName), // source file
+		takeoffOut,                            // output file
 		c.fieldDefHandler(TakeoffName, &opts, &takeoffDef), // header row handler
 		c.recordHandler(TakeoffName, &opts, &takeoffDef))   // data row handler
 	if nil != err {
@@ -125,20 +162,22 @@ func (c *CSM) Filter(opts Options) error {
 	}
 
 	ls, err := suite.New(
-		filepath.Join(c.csvPath, LandingName),              // source file
-		filepath.Join(c.xtcPath, LandingName),              // output file
+		filepath.Join(c.csvPath, LandingName), // source file
+		landingOut,                            // output file
 		c.fieldDefHandler(LandingName, &opts, &landingDef), // header row handler
 		c.recordHandler(LandingName, &opts, &landingDef))   // data row handler
 	if nil != err {
 		return err
 	}
 
-	log.Msg(
-		log.Info, "filter", "retained %d of %d records (%d of %d takeoff, %d of %d landing)",
-		ts.Filtered+ls.Filtered, ts.Processed+ls.Processed,
-		ts.Filtered, ts.Processed,
-		ls.Filtered, ls.Processed,
-	)
+	if !opts.LogFieldDefs {
+		log.Msg(
+			log.Info, "filter", "retained %d of %d records (%d of %d takeoff, %d of %d landing)",
+			ts.Filtered+ls.Filtered, ts.Processed+ls.Processed,
+			ts.Filtered, ts.Processed,
+			ls.Filtered, ls.Processed,
+		)
+	}
 
 	return nil
 }
@@ -150,6 +189,7 @@ func (c *CSM) fieldDefHandler(
 		*def = field.NewDef(r, OutPrefix, ExtPrefix)
 		if opts.LogFieldDefs {
 			(*def).Log(os.Stdout, name)
+			return r, false, true // stop processing after reading field def header
 		}
 		for i := range opts.Filters {
 			_, ok := (*def).ColForCsv(opts.Filters[i].Field())
