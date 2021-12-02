@@ -14,6 +14,8 @@ const (
 
 var Output io.Writer = os.Stdout
 
+func Raw(format string, args ...interface{}) { fmt.Fprintf(Output, format, args...) }
+
 func Msg(level int, prompt string, format string, args ...interface{}) {
 	var prefix string
 	var output io.Writer

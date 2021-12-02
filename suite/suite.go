@@ -26,11 +26,14 @@ func New(in, out string, define, handle RecordHandler) (*Suite, error) {
 		if nil != err {
 			return nil, err
 		}
-		o, err := os.Create(s.outPath)
+		f, err := os.Create(s.outPath)
 		if nil != err {
 			return nil, err
 		}
-		defer o.Close()
+		defer func() { _, _ = f.Sync(), f.Close() }()
+		// be sure to substitute the output writer from io.Discard (a bit bucket,
+		// or null device) to our physical output file.
+		o = f
 	}
 
 	i, err := os.Open(s.inPath)

@@ -22,7 +22,14 @@ var (
 	REVISION  string
 )
 
+func Version() string {
+	cat := func(s ...string) string { return strings.Join(s, "") }
+	sen := func(s ...string) string { return strings.Join(s, " ") }
+	return sen(PROJECT, "version", VERSION, cat("(", sen(cat(BRANCH, "@", REVISION), BUILDTIME), ")"), PLATFORM)
+}
+
 const (
+	printVersionFlag      = "v"
 	quietLoggingFlag      = "q"
 	logFieldDefsFlag      = "d"
 	invertFilterFlag      = "r"
@@ -35,6 +42,7 @@ const (
 func main() {
 
 	var (
+		printVersion      bool
 		quietLogging      bool
 		logFieldDefs      bool
 		invertFilter      bool
@@ -46,6 +54,8 @@ func main() {
 
 	const defaultExtractDirPath = "."
 
+	flag.BoolVar(&printVersion, printVersionFlag, false,
+		"Print "+PROJECT+" version information and exit")
 	flag.BoolVar(&quietLogging, quietLoggingFlag, false,
 		"Suppress printing non-error log messages (quiet)")
 	flag.BoolVar(&logFieldDefs, logFieldDefsFlag, false,
@@ -61,6 +71,11 @@ func main() {
 	flag.StringVar(&extractDirPath, extractDirPathFlag, defaultExtractDirPath,
 		"Extract and save filtered test suites to `dirpath`")
 	flag.Parse()
+
+	if printVersion {
+		log.Raw("%s\n", Version())
+		os.Exit(0)
+	}
 
 	givenFlag := map[string]bool{}
 	flag.Visit(func(f *flag.Flag) {

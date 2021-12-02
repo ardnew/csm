@@ -3,8 +3,9 @@
 # +----------------------------------------------------------------------------+
 
 # verify we have a valid GOPATH
-GOPATH ?= "$(shell go env GOPATH)"
-ifeq "" "$(strip $(GOPATH))"
+GOPATH    ?= $(shell go env GOPATH)
+SELGOPATH ?= $(firstword $(wildcard $(subst :, ,$(GOPATH))))
+ifeq "" "$(strip $(SELGOPATH))"
   $(error invalid GOPATH="$(GOPATH)")
 endif
 
@@ -14,12 +15,12 @@ endif
 
 PROJECT   ?= csm
 IMPORT    ?= github.com/ardnew/$(PROJECT)
-VERSION   ?= 0.1.2
+VERSION   ?= 0.1.4
 BUILDTIME ?= $(shell date -u '+%FT%TZ')
 PLATFORM  ?= linux-amd64
 
 # determine git branch and revision if metadata exists (if wildcard expands)
-ifneq "" "$(wildcard $(GOPATH)/src/$(IMPORT)/.git)"
+ifneq "" "$(wildcard $(SELGOPATH)/src/$(IMPORT)/.git)"
   # verify we have git installed
   ifneq "" "$(shell which git)"
     BRANCH   ?= $(shell git symbolic-ref --short HEAD)
@@ -121,7 +122,7 @@ goflags ?= -v -ldflags='-w -s $(foreach %,$(EXPORTS),-X "$(EXPORTPATH).$(%)=$($(
 
 # output paths
 srcdir := $(or $(GOCMD),$(IMPORT))
-bindir := $(shell go env GOPATH)/bin
+bindir := $(SELGOPATH)/bin
 binexe := $(bindir)/$(PROJECT)$(binext)
 outdir := $(BINPATH)/$(PLATFORM)
 outexe := $(outdir)/$(PROJECT)$(binext)
