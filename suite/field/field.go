@@ -22,11 +22,17 @@ type OutField struct {
 
 type FieldId int
 
+type Spec struct {
+	Name string
+	Col  int
+}
+
 type FieldDef struct {
 	In        []InField
 	Out       []OutField
 	OutPrefix string
 	ExtPrefix string
+	Selected  []Spec
 }
 
 func NewDef(r []string, outPrefix, extPrefix string) *FieldDef {
@@ -70,6 +76,7 @@ func NewDef(r []string, outPrefix, extPrefix string) *FieldDef {
 		Out:       out,
 		OutPrefix: outPrefix,
 		ExtPrefix: extPrefix,
+		Selected:  nil,
 	}
 }
 
@@ -108,6 +115,19 @@ func (def *FieldDef) Output(col int) (csv, ext string, ok bool) {
 	return csv, ext, ok
 }
 
+func (def *FieldDef) MakeSpecs(csvName []string) []Spec {
+	s := make([]Spec, len(csvName))
+	for i, c := range csvName {
+		n, ok := def.ColForCsv(c)
+		if ok {
+			s[i] = Spec{Name: c, Col: n}
+		} else {
+			s[i] = Spec{Name: "", Col: -1}
+		}
+	}
+	return s
+}
+
 func (def *FieldDef) ColForCsv(csvName string) (col int, ok bool) {
 	if !strings.HasPrefix(csvName, def.OutPrefix) &&
 		!strings.HasPrefix(csvName, def.ExtPrefix) {
@@ -128,11 +148,36 @@ func (def *FieldDef) ColForCsv(csvName string) (col int, ok bool) {
 	return -1, false
 }
 
+func (def *FieldDef) ColsForCsv(csvName []string) []int {
+	val := make([]int, len(csvName))
+	for i, c := range csvName {
+		val[i] = -1
+		if n, ok := def.ColForCsv(c); ok {
+			val[i] = n
+		}
+	}
+	return val
+}
+
 func (def *FieldDef) ValueForCsv(csvName string, record []string) (string, bool) {
 	if col, ok := def.ColForCsv(csvName); ok {
 		return record[col], true
 	}
 	return "", false
+}
+
+func (def *FieldDef) ValuesForCsv(csvName []string, record []string) []string {
+	return def.Values(def.MakeSpecs(csvName), record)
+}
+
+func (def *FieldDef) Values(col []Spec, record []string) []string {
+	val := make([]string, len(col))
+	for i, n := range col {
+		if n.Col >= 0 && n.Col < len(record) {
+			val[i] = record[n.Col]
+		}
+	}
+	return val
 }
 
 func (def *FieldDef) Log(w io.Writer, name string) {

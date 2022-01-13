@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -23,9 +24,8 @@ var (
 )
 
 func Version() string {
-	cat := func(s ...string) string { return strings.Join(s, "") }
-	sen := func(s ...string) string { return strings.Join(s, " ") }
-	return sen(PROJECT, "version", VERSION, cat("(", sen(cat(BRANCH, "@", REVISION), BUILDTIME), ")"), PLATFORM)
+	return fmt.Sprintf("%s version %s (%s@%s %s) %s",
+		PROJECT, VERSION, BRANCH, REVISION, BUILDTIME, PLATFORM)
 }
 
 const (
@@ -37,6 +37,9 @@ const (
 	suiteFilterFlag       = "f"
 	outputArchivePathFlag = "o"
 	extractDirPathFlag    = "x"
+	formatStringFlag      = "p"
+	procTakeoffFlag       = "t"
+	procLandingFlag       = "l"
 )
 
 func main() {
@@ -47,30 +50,63 @@ func main() {
 		logFieldDefs      bool
 		invertFilter      bool
 		keepContent       bool
+		procTakeoff       bool
+		procLanding       bool
 		suiteFilter       filter.Filters
 		outputArchivePath string
 		extractDirPath    string
+		formatString      string
 	)
 
 	const defaultExtractDirPath = "."
 
-	flag.BoolVar(&printVersion, printVersionFlag, false,
+	cli := flag.NewFlagSet("command-line", flag.ExitOnError)
+
+	cli.BoolVar(&printVersion, printVersionFlag, false,
 		"Print "+PROJECT+" version information and exit")
-	flag.BoolVar(&quietLogging, quietLoggingFlag, false,
+	cli.BoolVar(&quietLogging, quietLoggingFlag, false,
 		"Suppress printing non-error log messages (quiet)")
-	flag.BoolVar(&logFieldDefs, logFieldDefsFlag, false,
+	cli.BoolVar(&logFieldDefs, logFieldDefsFlag, false,
 		"List the field definitions parsed from headers")
-	flag.BoolVar(&invertFilter, invertFilterFlag, false,
+	cli.BoolVar(&invertFilter, invertFilterFlag, false,
 		"Invert matching semantics (select non-matching records)")
-	flag.BoolVar(&keepContent, keepContentFlag, false,
+	cli.BoolVar(&keepContent, keepContentFlag, false,
 		"Keep filtered files in extraction directory after suite creation")
-	flag.Var(&suiteFilter, suiteFilterFlag,
+	cli.BoolVar(&procTakeoff, procTakeoffFlag, true,
+		"Process takeoff test cases")
+	cli.BoolVar(&procLanding, procLandingFlag, true,
+		"Process landing test cases")
+	cli.Var(&suiteFilter, suiteFilterFlag,
 		"Select records matching `expression` (logical-OR of each flag given)")
-	flag.StringVar(&outputArchivePath, outputArchivePathFlag, "",
+	cli.StringVar(&outputArchivePath, outputArchivePathFlag, "",
 		"Create output test suite (.zip) at `filepath`")
-	flag.StringVar(&extractDirPath, extractDirPathFlag, defaultExtractDirPath,
+	cli.StringVar(&extractDirPath, extractDirPathFlag, defaultExtractDirPath,
 		"Extract and save filtered test suites to `dirpath`")
-	flag.Parse()
+	cli.StringVar(&formatString, formatStringFlag, "",
+		"Print each column named in trailing arguments per format `string`")
+
+	cliArg := []string{}
+	colArg := []string{}
+
+	var cliLen, colPos int
+	if len(os.Args) > 1 {
+		for i, a := range os.Args[1:] {
+			if a == "--" {
+				if pos := i + 2; len(os.Args) > pos {
+					colPos = pos
+				}
+				break
+			}
+			cliLen++
+		}
+		if cliLen > 0 {
+			cliArg = os.Args[1 : cliLen+1]
+		}
+		if colPos > 0 {
+			colArg = os.Args[colPos:]
+		}
+	}
+	cli.Parse(cliArg)
 
 	if printVersion {
 		log.Raw("%s\n", Version())
@@ -78,7 +114,7 @@ func main() {
 	}
 
 	givenFlag := map[string]bool{}
-	flag.Visit(func(f *flag.Flag) {
+	cli.Visit(func(f *flag.Flag) {
 		givenFlag[f.Name] = true
 	})
 
@@ -86,7 +122,7 @@ func main() {
 		log.Output = ioutil.Discard
 	}
 
-	if len(flag.Args()) == 0 {
+	if len(cliArg) == 0 {
 		log.Msg(log.Error, "error",
 			"no input test suite (.zip file or directory) provided")
 		os.Exit(1)
@@ -107,7 +143,7 @@ func main() {
 	if "" != outputArchivePath {
 		if !strings.HasSuffix(outputArchivePath, csm.ArchiveExt) {
 			outputArchivePath =
-				filepath.Join(outputArchivePath, filepath.Base(flag.Arg(0)))
+				filepath.Join(outputArchivePath, filepath.Base(cli.Arg(0)))
 			log.Msg(log.Warn, "warning", "using default output file name: %q",
 				outputArchivePath)
 		}
@@ -124,7 +160,7 @@ func main() {
 		}
 	}
 
-	path := flag.Arg(0)
+	path := cli.Arg(0)
 	{
 		p, err := csm.New(path, extractDirPath, outputArchivePath)
 		if nil != err {
@@ -152,6 +188,10 @@ func main() {
 			InvertFilter: invertFilter,
 			KeepContent:  keepContent,
 			Filters:      suiteFilter,
+			FormatString: formatString,
+			FormatCols:   colArg,
+			ProcTakeoff:  procTakeoff,
+			ProcLanding:  procLanding,
 		}
 		if err := p.Filter(opts); nil != err {
 			log.Msg(log.Error, "error", "csm.Filter(): %s", err.Error())

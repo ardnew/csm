@@ -1,9 +1,11 @@
 package csm
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/ardnew/csm/log"
 	"github.com/ardnew/csm/suite"
@@ -36,6 +38,10 @@ type Options struct {
 	InvertFilter bool
 	KeepContent  bool
 	Filters      filter.Filters
+	FormatString string
+	FormatCols   []string
+	ProcTakeoff  bool
+	ProcLanding  bool
 }
 
 func New(arcPath, xtcPath, outPath string) (*CSM, error) {
@@ -152,34 +158,78 @@ func (c *CSM) Filter(opts Options) error {
 		landingOut = filepath.Join(c.xtcPath, LandingName)
 	}
 
-	ts, err := suite.New(
-		filepath.Join(c.csvPath, TakeoffName), // source file
-		takeoffOut,                            // output file
-		c.fieldDefHandler(TakeoffName, &opts, &takeoffDef), // header row handler
-		c.recordHandler(TakeoffName, &opts, &takeoffDef))   // data row handler
-	if nil != err {
-		return err
+	var tf, tp, lf, lp int
+
+	if opts.ProcTakeoff {
+		ts, err := suite.New(
+			filepath.Join(c.csvPath, TakeoffName), // source file
+			takeoffOut,                            // output file
+			c.fieldDefHandler(TakeoffName, &opts, &takeoffDef), // header row handler
+			c.recordHandler(TakeoffName, &opts, &takeoffDef))   // data row handler
+		if nil != err {
+			return err
+		}
+		tf, tp = ts.Filtered, ts.Processed
 	}
 
-	ls, err := suite.New(
-		filepath.Join(c.csvPath, LandingName), // source file
-		landingOut,                            // output file
-		c.fieldDefHandler(LandingName, &opts, &landingDef), // header row handler
-		c.recordHandler(LandingName, &opts, &landingDef))   // data row handler
-	if nil != err {
-		return err
+	if opts.ProcLanding {
+		ls, err := suite.New(
+			filepath.Join(c.csvPath, LandingName), // source file
+			landingOut,                            // output file
+			c.fieldDefHandler(LandingName, &opts, &landingDef), // header row handler
+			c.recordHandler(LandingName, &opts, &landingDef))   // data row handler
+		if nil != err {
+			return err
+		}
+		lf, lp = ls.Filtered, ls.Processed
 	}
 
 	if !opts.LogFieldDefs {
 		log.Msg(
 			log.Info, "filter", "retained %d of %d records (%d of %d takeoff, %d of %d landing)",
-			ts.Filtered+ls.Filtered, ts.Processed+ls.Processed,
-			ts.Filtered, ts.Processed,
-			ls.Filtered, ls.Processed,
+			tf+lf, tp+lp, tf, tp, lf, lp,
 		)
 	}
 
 	return nil
+}
+
+func (c *CSM) formatRecord(format string, col []field.Spec, rec []string) (string, bool) {
+	arg := make([]interface{}, len(col))
+	// if rec is nil, we are printing the header field definitions
+	if rec == nil {
+		// check if we need to build the format string or not
+		if format == "" {
+			// auto-built format string is simply space-delimited elements
+			elf := make([]string, len(col))
+			for i, s := range col {
+				arg[i] = s.Name // convert string to interface{} for Sprintf
+				elf[i] = "%s"
+			}
+			format = strings.Join(elf, " ")
+		} else {
+			for i, s := range col {
+				arg[i] = s.Name // convert string to interface{} for Sprintf
+			}
+		}
+	} else {
+		// check if we need to build the format string or not
+		if format == "" {
+			// auto-built format string is simply space-delimited elements
+			elf := make([]string, len(col))
+			for i, s := range col {
+				arg[i] = rec[s.Col] // convert string to interface{} for Sprintf
+				elf[i] = "%s"
+			}
+			format = strings.Join(elf, " ")
+		} else {
+			for i, s := range col {
+				arg[i] = rec[s.Col] // convert string to interface{} for Sprintf
+			}
+		}
+	}
+	// return true if and only if we have anything to format
+	return fmt.Sprintf(format, arg...), len(arg) > 0 || format != ""
 }
 
 func (c *CSM) fieldDefHandler(
@@ -195,10 +245,25 @@ func (c *CSM) fieldDefHandler(
 			_, ok := (*def).ColForCsv(opts.Filters[i].Field())
 			opts.Filters[i].SetValid(ok)
 			if !ok {
-				log.Msg(log.Warn, "filter", "ignoring %s filter on unknown field: %q",
+				log.Msg(log.Warn, "filter", "ignoring filter on unknown field: %s: %q",
 					name, opts.Filters[i].Field())
 			}
 		}
+
+		(*def).Selected = make([]field.Spec, 0, len(opts.FormatCols))
+		for _, c := range opts.FormatCols {
+			n, ok := (*def).ColForCsv(c)
+			if ok {
+				(*def).Selected = append((*def).Selected, field.Spec{Name: c, Col: n})
+			} else {
+				log.Msg(log.Warn, "format", "ignoring unknown field: %s: %q", name, c)
+			}
+		}
+		h, ok := c.formatRecord(opts.FormatString, (*def).Selected, nil)
+		if ok {
+			log.Raw(h + "\n")
+		}
+
 		return r, false, false
 	}
 }
@@ -221,6 +286,12 @@ func (c *CSM) recordHandler(
 		if opts.InvertFilter {
 			// skip this case if any criteria matched
 			skip = !skip
+		}
+		if !skip {
+			h, ok := c.formatRecord(opts.FormatString, (*def).Selected, r)
+			if ok {
+				log.Raw(h + "\n")
+			}
 		}
 		return r, skip, stop
 	}
