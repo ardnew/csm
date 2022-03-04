@@ -132,11 +132,14 @@ func (c *CSM) Compress(opts Options) error {
 	}
 	takeoffPath := filepath.Join(c.xtcPath, TakeoffName)
 	landingPath := filepath.Join(c.xtcPath, LandingName)
-	err := archiver.Archive([]string{takeoffPath, landingPath}, c.outPath)
-	if nil != err {
-		return err
-	}
+	return archiver.Archive([]string{takeoffPath, landingPath}, c.outPath)
+}
+
+func (c *CSM) Cleanup(opts Options) error {
 	if !opts.KeepContent {
+		takeoffPath := filepath.Join(c.xtcPath, TakeoffName)
+		landingPath := filepath.Join(c.xtcPath, LandingName)
+		log.Msg(log.Info, "cleanup", "%+v", enquote(takeoffPath, landingPath))
 		if err := os.Remove(takeoffPath); nil != err && !os.IsNotExist(err) {
 			return err
 		}
@@ -159,30 +162,50 @@ func (c *CSM) Filter(opts Options) error {
 	}
 
 	var tf, tp, lf, lp int
+	var defHandler, rowHandler suite.RecordHandler
+
+	keepHandler :=
+		func(r []string) (rec []string, skip, stop bool) {
+			return r, false, false
+		}
+	stopHandler :=
+		func(r []string) (rec []string, skip, stop bool) {
+			return r, false, true
+		}
 
 	if opts.ProcTakeoff {
-		ts, err := suite.New(
-			filepath.Join(c.csvPath, TakeoffName), // source file
-			takeoffOut,                            // output file
-			c.fieldDefHandler(TakeoffName, &opts, &takeoffDef), // header row handler
-			c.recordHandler(TakeoffName, &opts, &takeoffDef))   // data row handler
-		if nil != err {
-			return err
-		}
-		tf, tp = ts.Filtered, ts.Processed
+		defHandler = c.fieldDefHandler(TakeoffName, &opts, &takeoffDef) // header row handler
+		rowHandler = c.recordHandler(TakeoffName, &opts, &takeoffDef)   // data row handler
+	} else {
+		defHandler = keepHandler
+		rowHandler = stopHandler
 	}
+	ts, err := suite.New(
+		filepath.Join(c.csvPath, TakeoffName), // source file
+		takeoffOut,                            // output file
+		defHandler,                            // header row handler
+		rowHandler)                            // data row handler
+	if nil != err {
+		return err
+	}
+	tf, tp = ts.Filtered, ts.Processed
 
 	if opts.ProcLanding {
-		ls, err := suite.New(
-			filepath.Join(c.csvPath, LandingName), // source file
-			landingOut,                            // output file
-			c.fieldDefHandler(LandingName, &opts, &landingDef), // header row handler
-			c.recordHandler(LandingName, &opts, &landingDef))   // data row handler
-		if nil != err {
-			return err
-		}
-		lf, lp = ls.Filtered, ls.Processed
+		defHandler = c.fieldDefHandler(LandingName, &opts, &landingDef) // header row handler
+		rowHandler = c.recordHandler(LandingName, &opts, &landingDef)   // data row handler
+	} else {
+		defHandler = keepHandler
+		rowHandler = stopHandler
 	}
+	ls, err := suite.New(
+		filepath.Join(c.csvPath, LandingName), // source file
+		landingOut,                            // output file
+		defHandler,                            // header row handler
+		rowHandler)                            // data row handler
+	if nil != err {
+		return err
+	}
+	lf, lp = ls.Filtered, ls.Processed
 
 	if !opts.LogFieldDefs {
 		log.Msg(
@@ -295,4 +318,26 @@ func (c *CSM) recordHandler(
 		}
 		return r, skip, stop
 	}
+}
+
+func escape(str string) string {
+	// escape (\) all double-quote, single-quote, backslash, and backtick runes
+	const meta = "\"'\\`"
+	var buf strings.Builder
+	buf.Grow(len(str))
+	for _, c := range str {
+		if strings.IndexRune(meta, c) > -1 {
+			buf.WriteRune('\\')
+		}
+		buf.WriteRune(c)
+	}
+	return buf.String()
+}
+
+func enquote(str ...string) []string {
+	ret := make([]string, len(str))
+	for i, s := range str {
+		ret[i] = `"` + escape(s) + `"`
+	}
+	return ret
 }

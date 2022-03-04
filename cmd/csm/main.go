@@ -62,6 +62,40 @@ func main() {
 
 	cli := flag.NewFlagSet("command-line", flag.ExitOnError)
 
+	cli.SetOutput(os.Stderr)
+	cli.Usage = func() {
+		fmt.Fprintf(os.Stderr, "%s\n", Version())
+		fmt.Fprintf(os.Stderr, "\n")
+		fmt.Fprintf(os.Stderr, "SYNOPSIS\n")
+		fmt.Fprintf(os.Stderr, "\n")
+		fmt.Fprintf(os.Stderr, "  The Calculator Suite Manager (csm) is a Swiss-Army Knife for analyzing, modifying, and constructing\n")
+		fmt.Fprintf(os.Stderr, "  automated test suites used by the PC-based FMPS/DAPA Calculator. The test suites are zip-compressed\n")
+		fmt.Fprintf(os.Stderr, "  archives containing two regular files at the root of the archive:\n")
+		fmt.Fprintf(os.Stderr, "\n")
+		fmt.Fprintf(os.Stderr, "    Suite.zip\n")
+		fmt.Fprintf(os.Stderr, "      |__ takeoff.testcase.csv        - Takeoff test cases\n")
+		fmt.Fprintf(os.Stderr, "      |__ landing.testcase.csv        - Landing test cases\n")
+		fmt.Fprintf(os.Stderr, "\n")
+		fmt.Fprintf(os.Stderr, "  The test cases are formatted as comma-separated values (CSV), with one test case per line. The first\n")
+		fmt.Fprintf(os.Stderr, "  line in each file contains a header row, which defines the data item corresponding to each CSV column.\n")
+		fmt.Fprintf(os.Stderr, "\n")
+		fmt.Fprintf(os.Stderr, "  This tool reconstructs the table schema of each test suite by parsing the header row found in each\n")
+		fmt.Fprintf(os.Stderr, "  file. Thus, as the test suites grow and evolve, no change is required to the tool to understand the\n")
+		fmt.Fprintf(os.Stderr, "  different schemas. The same tool can be used with both FMPS and DAPA automated test suites.\n")
+		fmt.Fprintf(os.Stderr, "\n")
+		fmt.Fprintf(os.Stderr, "USAGE\n")
+		fmt.Fprintf(os.Stderr, "\n")
+		fmt.Fprintf(os.Stderr, "  There are three primary use cases the tool currently supports, with general usage as follows:\n")
+		fmt.Fprintf(os.Stderr, "\n")
+		fmt.Fprintf(os.Stderr, "    %s [flags] [-o output] input[.zip]                     - Extract test cases into new test suite\n", PROJECT)
+		fmt.Fprintf(os.Stderr, "    %s [flags] -d input[.zip]                              - Display test suite table schema\n", PROJECT)
+		fmt.Fprintf(os.Stderr, "    %s [flags] [-p format] input[.zip] [-- columns]        - Print formatted values of test cases\n", PROJECT)
+		fmt.Fprintf(os.Stderr, "\n")
+		fmt.Fprintf(os.Stderr, "FLAGS\n")
+		fmt.Fprintf(os.Stderr, "\n")
+		cli.PrintDefaults()
+	}
+
 	cli.BoolVar(&printVersion, printVersionFlag, false,
 		"Print "+PROJECT+" version information and exit")
 	cli.BoolVar(&quietLogging, quietLoggingFlag, false,
@@ -124,7 +158,7 @@ func main() {
 
 	if len(cliArg) == 0 {
 		log.Msg(log.Error, "error",
-			"no input test suite (.zip file or directory) provided")
+			"no input test suite (.zip file or directory) provided. see -h for usage.")
 		os.Exit(1)
 	}
 
@@ -197,10 +231,16 @@ func main() {
 			log.Msg(log.Error, "error", "csm.Filter(): %s", err.Error())
 			os.Exit(7)
 		}
-		if "" != outputArchivePath {
-			if err := p.Compress(opts); nil != err {
-				log.Msg(log.Error, "error", "csm.Compress(): %s", err.Error())
-				os.Exit(8)
+		if !opts.LogFieldDefs {
+			if "" != outputArchivePath {
+				if err := p.Compress(opts); nil != err {
+					log.Msg(log.Error, "error", "csm.Compress(): %s", err.Error())
+					os.Exit(8)
+				}
+			}
+			if err := p.Cleanup(opts); nil != err {
+				log.Msg(log.Error, "error", "csm.Cleanup(): %s", err.Error())
+				os.Exit(9)
 			}
 		}
 	}
