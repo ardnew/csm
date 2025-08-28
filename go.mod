@@ -8,5 +8,5 @@ require (
 	github.com/klauspost/compress v1.11.0 // indirect
 	github.com/klauspost/pgzip v1.2.5 // indirect
 	github.com/mholt/archiver/v3 v3.3.1
-	github.com/ulikunitz/xz v0.5.8 // indirect
+	github.com/ulikunitz/xz v0.5.14 // indirect
 )
